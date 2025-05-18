@@ -8,12 +8,16 @@
 #include "threads/flags.h"
 #include "intrinsic.h"
 #include "lib/kernel/console.h"
+#include "filesys/directory.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
+void check_address(void *addr);
 static int sys_write(int fd, const void *buffer, unsigned size);
 static void sys_exit(int);
 static void sys_halt();
+bool sys_create(const char *file, unsigned initial_size);
+bool strlcpy_user(char *dst, const char *src_user, size_t size);
 
 /* 시스템 콜.
  *
@@ -59,7 +63,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	switch (syscall_num)
 	{
 	case SYS_HALT:
-
+		sys_halt();
 		break;
 	case SYS_EXIT:
 		sys_exit(arg1);
@@ -69,6 +73,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	case SYS_EXEC:
 		break;
 	case SYS_CREATE:
+		f->R.rax = sys_create(arg1, arg2);
 		break;
 	case SYS_REMOVE:
 		break;
@@ -94,6 +99,20 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	}
 }
 
+void check_address(void *addr)
+{
+	if (addr == NULL)
+		sys_exit(-1);
+	if (!is_user_vaddr(addr))
+		sys_exit(-1);
+	if (pml4_get_page(thread_current()->pml4, addr) == NULL)
+		sys_exit(-1);
+}
+
+static void sys_halt() {
+	power_off();
+}
+
 static int sys_write(int fd, const void *buffer, unsigned size)
 {
 	if (fd == 1)
@@ -111,4 +130,47 @@ static void sys_exit(int status)
 
 	printf("%s: exit(%d)\n", thread_name(), status);
 	thread_exit();
+}
+
+bool sys_create(const char *file, unsigned initial_size) {
+	check_address(file);
+
+	char kernel_buf[NAME_MAX + 1];
+    if (!strlcpy_user(kernel_buf, file, sizeof kernel_buf)) {
+        return false;  // null terminator 없음 or 너무 김
+    }
+
+	if (strlen(kernel_buf) == 0) {
+		return false;
+	}
+
+	struct dir *dir = dir_open_root();
+	if (dir == NULL) {
+		return false;
+	}
+	struct inode *inode;
+
+    if (dir_lookup(dir, kernel_buf, &inode)) {
+		dir_close(dir);
+		return false;
+	}
+	
+	bool success = filesys_create(kernel_buf, initial_size);
+
+	dir_close(dir);
+	return success;
+}
+
+bool strlcpy_user(char *dst, const char *src_user, size_t size) {
+    for (size_t i = 0; i < size; i++) {
+        check_address((void *)(src_user + i));  // 유저 메모리 접근 안전성 확인
+        char c = *(uint8_t *)(src_user + i);
+        dst[i] = c;
+        if (c == '\0'){
+			// printf("[DEBUG] strlcpy_user: copied string = '%s'\n", dst);
+    		return true;
+		}
+    }
+    dst[size - 1] = '\0';
+    return false;
 }
