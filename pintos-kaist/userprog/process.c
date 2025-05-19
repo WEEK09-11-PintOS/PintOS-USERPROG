@@ -32,6 +32,10 @@ static void __do_fork(void *);
 static int parse_args(char *, char *[]);
 static bool setup_stack(struct intr_frame *if_);
 
+
+
+
+
 /* General process initializer for initd and other process. */
 static void
 process_init(void)
@@ -62,6 +66,9 @@ tid_t process_create_initd(const char *file_name)
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
+
+
+
 	if (tid == TID_ERROR)
 		palloc_free_page(fn_copy);
 	return tid;
@@ -234,55 +241,110 @@ static int parse_args(char *target, char *argv[])
  * 즉시 -1을 반환하고 기다리지 않습니다.
  *
  * 이 함수는 문제 2-2에서 구현될 예정입니다. 지금은 아무 것도 하지 않습니다. */
-int process_wait(tid_t child_tid UNUSED)
-{
-
-	/* XXX: 힌트) pintos는 process_wait(initd)를 호출하면 종료되므로,
-	 * XXX:       process_wait을 구현하기 전까지는 여기에 무한 루프를 넣는 것을 추천합니다. */
-	for (int i = 0; i < 100000000; i++)
-	{
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++)
-	{
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++)
-	{
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++)
-	{
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++)
-	{
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++)
-	{
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++)
-	{
-		int data = 1;
-	}
 
 
+struct thread 
+*get_child_by_tid(tid_t child_tid){
+	struct thread *cur = thread_current();
+	struct thread *v = NULL;
 
-	return -1;
+
+	for(struct list_elem *i =list_begin(&cur->children); i != list_end(&cur->children); i = i->next){
+		struct thread *t = list_entry(i, struct thread, child_elem);
+		if(t->tid == child_tid){
+			v = t;
+			break;
+		}
+
+	}
+	
+	return v;
 }
 
-/* 프로세스를 종료합니다. 이 함수는 thread_exit()에 의해 호출됩니다. */
-void process_exit(void)
-{
-	struct thread *curr = thread_current();
 
-	/* TODO: 여기에 코드를 작성하세요.
-	 * TODO: 프로세스 종료 메시지를 구현하세요 (project2/process_termination.html 참고).
-	 * TODO: 우리는 이곳에 프로세스 자원 정리를 구현하는 것을 추천합니다. */
+int
+process_wait (tid_t child_tid) {
+	//for문으로 인자값 서치, 있으면 바로 child status 반환 없으면 블록
+	enum intr_level old_level = intr_disable();
+	struct thread *cur = thread_current();
+	
 
-	process_cleanup();
+	struct thread *search_cur = get_child_by_tid(child_tid);
+	intr_set_level(old_level);
+	if (search_cur == NULL)
+		return -1;
+
+	
+	sema_down(&search_cur->wait_sema);
+	int stat = search_cur->exit_status;
+	list_remove(&search_cur->child_elem);
+
+	sema_up(&search_cur->exit_sema);
+
+	return stat;
+
+
+
+	// for (int i = 0; i < 100000000; i++)
+	// {
+	// 	int data = 1;
+	// }
+	// for (int i = 0; i < 100000000; i++)
+	// {
+	// 	int data = 1;
+	// }
+	// for (int i = 0; i < 100000000; i++)
+	// {
+	// 	int data = 1;
+	// }
+	// for (int i = 0; i < 100000000; i++)
+	// {
+	// 	int data = 1;
+	// }
+	// for (int i = 0; i < 100000000; i++)
+	// {
+	// 	int data = 1;
+	// }
+
+
+
+
+	// return -1;
+}
+
+/* Exit the process. This function is called by thread_exit (). */
+void
+process_exit (void) {
+	struct thread *cur = thread_current ();
+
+	for(int i = 2; i<cur->next_FD; i++){
+		if (cur->FDT[i] != NULL)
+			file_close(cur->FDT[i]);
+		cur->FDT[i] = NULL;
+	}
+	
+	// //실행 중ㅇ인 파일에 대한 별도 처리 필요 ex cur->runngin_file
+
+
+	palloc_free_page(cur->FDT);
+
+	//syscall의 exit에서 exit_status 설정이 선행되어야함
+	// printf("exit: %s: %d\n", thread_name(), cur->exit_status);
+
+	
+	
+	if (cur->parent != NULL){
+		sema_up(&cur->wait_sema);
+	}
+
+	//이 사이에 부모가 삭제될 수도 있으니 분기 또한 구별
+	if (cur->parent != NULL){
+		sema_down(&cur->exit_sema);
+	}
+	//근데 부모 스레드가 wait을 안걸면 어떻게 되는거지...? down이 해제가 안되나..?
+	//전제 조건 1: wait / exit sema 둘다 0으로 기본 세팅 되어있어야함
+	//전제 조건 2: thread_exit 내부 로직에 자식 스레드 관련 부모 삭제와 sema up 처리가 추가되어야함
+	process_cleanup ();
 }
 
 /* 현재 프로세스의 자원을 해제합니다. */
@@ -680,6 +742,8 @@ install_page(void *upage, void *kpage, bool writable)
 	 * address, then map our page there. */
 	return (pml4_get_page(t->pml4, upage) == NULL && pml4_set_page(t->pml4, upage, kpage, writable));
 }
+
+
 #else
 /* 여기부터 코드는 project 3 이후 사용됩니다.
  * project 2만을 위해 함수를 구현하려면 위쪽 블록에서 구현하세요. */

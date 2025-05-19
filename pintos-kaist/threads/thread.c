@@ -213,14 +213,12 @@ tid_t thread_create(const char *name, int priority,
 
 	tid = t->tid = allocate_tid();
 	
-	sema_init(&t->wait_sema, 0);
-	sema_init(&t->exit_sema, 0);
-	list_init(&t->children);
-	t->next_FD = 2;
+
 
 	//수정 가능성 있음
-	t->parent = NULL; 
-	list_push_back(&t->children, &t->child_elem);
+    t->parent = thread_current();
+    list_push_back(&t->parent->children, &t->child_elem);
+
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -591,6 +589,15 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->pending_lock = NULL;
 	t->magic = THREAD_MAGIC;
 
+
+
+	
+	sema_init(&t->wait_sema, 0);
+	sema_init(&t->exit_sema, 0);
+	list_init(&t->children);
+	t->next_FD = 2;
+
+
 	if (thread_mlfqs)
 	{
 		if (t == initial_thread)
@@ -770,14 +777,14 @@ schedule(void)
 		   실제 파괴 로직은 schedule()의 시작 부분에서 호출됩니다. */
 		if (curr && curr->status == THREAD_DYING && curr != initial_thread)
 		{
-			// if(!list_empty(&curr->children)){
-			// 	struct list_elem *child = list_begin(&curr->children);
-			// 	while (child != list_end(&curr->children)){
-			// 		struct thread *child_t = list_entry(child, struct thread, child_elem);
-			// 		child = list_remove(&child_t->child_elem);
-			// 		child_t->parent = NULL;
-			// 	}
-			// }
+			if(!list_empty(&curr->children)){
+				struct list_elem *child = list_begin(&curr->children);
+				while (child != list_end(&curr->children)){
+					struct thread *child_t = list_entry(child, struct thread, child_elem);
+					child = list_remove(&child_t->child_elem);
+					child_t->parent = NULL;
+				}
+			}
 			
 			
 			ASSERT(curr != next);
