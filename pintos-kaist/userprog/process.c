@@ -178,9 +178,8 @@ error:
  * 실패 시 -1을 반환합니다. */
 int process_exec(void *f_name)
 {
-	char *file_name = f_name;
-	char cp_file_name[MAX_BUF];
-	memcpy(cp_file_name, file_name, strlen(file_name) + 1);
+	char *argv[MAX_ARGS];
+	int argc = parse_args(f_name, argv);
 	bool success;
 
 	/* intr_frame을 thread 구조체 안의 것을 사용할 수 없습니다.
@@ -191,22 +190,20 @@ int process_exec(void *f_name)
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
-	/* 유저 스택 페이지 할당 */
-	// setup_stack(&_if);
-
 	/* 현재 컨텍스트를 제거합니다. */
 	process_cleanup();
 
-	// memset(&_if, 0, sizeof _if);
-
 	/* 그리고 이진 파일을 로드합니다. */
-	ASSERT(cp_file_name != NULL);
-	success = load(cp_file_name, &_if);
+	ASSERT(argv[0] != NULL);
+	success = load(argv[0], &_if);
+	argument_stack(argv, argc, &_if);
 
 	/* 로드 실패 시 종료합니다. */
-	palloc_free_page(file_name);
-	if (!success)
+	if (!success) {
+		palloc_free_page(f_name);
 		return -1;
+	}
+	palloc_free_page(f_name);
 
 	// hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)_if.rsp, true);
 	/* 프로세스를 전환합니다. */
@@ -286,15 +283,17 @@ process_exit (void) {
 		cur->FDT[i] = NULL;
 	}
 	
-	// //실행 중ㅇ인 파일에 대한 별도 처리 필요 ex cur->runngin_file
-
+	// 실행 중인 파일 해제
+	if (thread_current()->running_file != NULL) {
+		file_allow_write(thread_current()->running_file);
+		file_close(thread_current()->running_file);
+		thread_current()->running_file = NULL;
+	}
 
 	palloc_free_page(cur->FDT);
 
 	//syscall의 exit에서 exit_status 설정이 선행되어야함
 	// printf("exit: %s: %d\n", thread_name(), cur->exit_status);
-
-	
 	
 	if (cur->parent != NULL){
 		sema_up(&cur->wait_sema);
@@ -421,13 +420,6 @@ load(const char *file_name, struct intr_frame *if_)
 	struct file *file = NULL;
 	off_t file_ofs;
 	bool success = false;
-	int i;
-
-	char *argv[MAX_ARGS];
-	// int argc = 0;
-	int argc = parse_args(file_name, argv);
-	// strlcpy(thread_current()->name, argv[0], sizeof thread_current()->name);
-	uint64_t rsp_arr[argc];
 
 	/* 페이지 디렉터리를 할당하고 활성화합니다. */
 	t->pml4 = pml4_create();
@@ -453,7 +445,7 @@ load(const char *file_name, struct intr_frame *if_)
 
 	/* 프로그램 헤더들을 읽습니다. */
 	file_ofs = ehdr.e_phoff;
-	for (i = 0; i < ehdr.e_phnum; i++)
+	for (int i = 0; i < ehdr.e_phnum; i++)
 	{
 		struct Phdr phdr;
 
@@ -522,41 +514,15 @@ load(const char *file_name, struct intr_frame *if_)
 	/* 시작 주소를 설정합니다. */
 	if_->rip = ehdr.e_entry;
 
-	/* TODO: 여기에 코드를 작성하세요.
-	 * TODO: 인자 전달을 구현하세요 (project2/argument_passing.html 참고). */
-	for (int i = argc - 1; i >= 0; i--)
-	{
-		if_->rsp -= strlen(argv[i]) + 1;
-		rsp_arr[i] = if_->rsp;
-		memcpy((void *)if_->rsp, argv[i], strlen(argv[i]) + 1);
-	}
-
-	while (if_->rsp % 8 != 0)
-	{
-		if_->rsp--;				  // 주소값을 1 내리고
-		*(uint8_t *)if_->rsp = 0; // 데이터에 0 삽입 => 8바이트 저장
-	}
-
-	if_->rsp -= 8; // NULL 문자열을 위한 주소 공간, 64비트니까 8바이트 확보
-	memset(if_->rsp, 0, sizeof(char **));
-
-	for (int i = argc - 1; i >= 0; i--)
-	{
-		if_->rsp -= 8; // 8바이트만큼 rsp감소
-		memcpy(if_->rsp, &rsp_arr[i], sizeof(char **));
-	}
-
-	if_->rsp -= 8;
-	memset(if_->rsp, 0, sizeof(void *));
-
-	if_->R.rdi = argc;
-	if_->R.rsi = if_->rsp + 8;
-
 	success = true;
+	file_deny_write(file);
+	t->running_file = file;
+	goto done;
 
 done:
-	/* load의 성공 여부와 상관없이 여기로 도달합니다. */
-	file_close(file);
+	/* load의 성공 여부와 상관없이 여기로 도달 */
+	if (!success && file != NULL)
+		file_close(file); // 성공하지 못한 경우에만 닫음
 	return success;
 }
 
@@ -707,15 +673,78 @@ install_page(void *upage, void *kpage, bool writable)
 }
 
 tid_t process_execute(const char *file_name) {
-	// TODO
+	char *fn_copy;
+	tid_t child_tid;
+
+	fn_copy = palloc_get_page(0);
+	if (fn_copy == NULL) {
+		return TID_ERROR;
+	}
+
+	strlcpy (fn_copy, file_name, PGSIZE);
+
+	child_tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
+	if (child_tid == TID_ERROR) {
+		palloc_free_page(fn_copy);	// 부모가 직접 회수
+		return TID_ERROR;
+	}
+	struct thread *child = get_child_by_tid(child_tid);
+	ASSERT (child != NULL);	// 리스트에서 찾지 못하면 버그
+
+	sema_down(&child->fork_sema);	// load 완료 대기
+
+	if (child->exit_status == -1) {
+		return TID_ERROR;	// 자식이 fn_copy를 이미 회수
+	}
+	return child_tid;
 }
 
 static void start_process(void *f_name) {
-	// TODO
+	if (process_exec(f_name) == -1) {
+		// 실패한 경우에만 여기 도달
+		struct thread *curr = thread_current();
+		curr->exit_status = -1;
+		sema_up(&curr->fork_sema);
+		process_exit();
+	}
 }
 
 static void argument_stack(char *argv[], int argc, struct intr_frame *if_) {
-	// TODO
+	uint64_t rsp_arr[argc];
+
+	// 문자열 역순 복사 및 rsp push
+	for (int i = argc - 1; i >= 0; i--)
+	{
+		size_t len = strlen(argv[i]) + 1;
+		if_->rsp -= len;
+		rsp_arr[i] = if_->rsp;
+		memcpy((void *)if_->rsp, argv[i], len);
+	}
+
+	// 8바이트 정렬
+	if_->rsp = if_->rsp & ~0xF;
+
+	// NULL sentinel
+    if_->rsp -= 8;
+	memset(if_->rsp, 0, sizeof(char **));
+    // *(uint64_t *)if_->rsp = 0;
+
+    // argv[i] 포인터들 (역순 push)
+	for (int i = argc - 1; i >= 0; i--)
+	{
+		if_->rsp -= 8; // 8바이트만큼 rsp감소
+		memcpy(if_->rsp, &rsp_arr[i], sizeof(char **));
+		// *(uint64_t *)if_->rsp = (uint64_t)argv_addr[i];
+	}
+
+	/* fake return address */
+	if_->rsp -= 8;
+	memset(if_->rsp, 0, sizeof(void *));
+	// *(uint64_t *)if_->rsp = 0;
+
+	// intr_frame 갱신
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp + 8;
 }
 
 int process_add_file(struct file *file) {
