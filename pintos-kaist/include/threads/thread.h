@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include "threads/interrupt.h"
 #include "threads/fixed-point.h"
-
+#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -104,7 +104,18 @@ struct thread
 	int nice;			// 양보하려는 정도?
 	fixed_t recent_cpu; // CPU를 얼마나 점유했나?
 	struct list_elem all_elem;
+	
 	int exit_status;
+	struct semaphore wait_sema;
+	struct semaphore exit_sema;
+	struct semaphore fork_sema;
+	
+	struct list children;              // 자식 프로세스 리스트
+    struct list_elem child_elem;      // 부모의 children 리스트에 들어갈 element
+    struct thread *parent;            // 부모 프로세스 포인터
+
+	struct file **FDT;
+	int next_FD;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
