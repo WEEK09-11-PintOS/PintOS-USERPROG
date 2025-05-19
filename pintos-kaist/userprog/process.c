@@ -32,9 +32,9 @@ static void __do_fork(void *);
 static int parse_args(char *, char *[]);
 static bool setup_stack(struct intr_frame *if_);
 
-
-
-
+tid_t process_execute(const char *file_name); // 실행 요청
+static void start_process(void *f_name);      // 실행 시작
+static void argument_stack(char *argv[], int argc, struct intr_frame *if_);
 
 /* General process initializer for initd and other process. */
 static void
@@ -66,9 +66,6 @@ tid_t process_create_initd(const char *file_name)
 
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
-
-
-
 	if (tid == TID_ERROR)
 		palloc_free_page(fn_copy);
 	return tid;
@@ -241,13 +238,10 @@ static int parse_args(char *target, char *argv[])
  * 즉시 -1을 반환하고 기다리지 않습니다.
  *
  * 이 함수는 문제 2-2에서 구현될 예정입니다. 지금은 아무 것도 하지 않습니다. */
-
-
 struct thread 
 *get_child_by_tid(tid_t child_tid){
 	struct thread *cur = thread_current();
 	struct thread *v = NULL;
-
 
 	for(struct list_elem *i =list_begin(&cur->children); i != list_end(&cur->children); i = i->next){
 		struct thread *t = list_entry(i, struct thread, child_elem);
@@ -261,19 +255,16 @@ struct thread
 	return v;
 }
 
-
 int
 process_wait (tid_t child_tid) {
 	//for문으로 인자값 서치, 있으면 바로 child status 반환 없으면 블록
 	enum intr_level old_level = intr_disable();
 	struct thread *cur = thread_current();
-	
 
 	struct thread *search_cur = get_child_by_tid(child_tid);
 	intr_set_level(old_level);
 	if (search_cur == NULL)
 		return -1;
-
 	
 	sema_down(&search_cur->wait_sema);
 	int stat = search_cur->exit_status;
@@ -282,34 +273,6 @@ process_wait (tid_t child_tid) {
 	sema_up(&search_cur->exit_sema);
 
 	return stat;
-
-
-
-	// for (int i = 0; i < 100000000; i++)
-	// {
-	// 	int data = 1;
-	// }
-	// for (int i = 0; i < 100000000; i++)
-	// {
-	// 	int data = 1;
-	// }
-	// for (int i = 0; i < 100000000; i++)
-	// {
-	// 	int data = 1;
-	// }
-	// for (int i = 0; i < 100000000; i++)
-	// {
-	// 	int data = 1;
-	// }
-	// for (int i = 0; i < 100000000; i++)
-	// {
-	// 	int data = 1;
-	// }
-
-
-
-
-	// return -1;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -743,6 +706,33 @@ install_page(void *upage, void *kpage, bool writable)
 	return (pml4_get_page(t->pml4, upage) == NULL && pml4_set_page(t->pml4, upage, kpage, writable));
 }
 
+tid_t process_execute(const char *file_name) {
+	// TODO
+}
+
+static void start_process(void *f_name) {
+	// TODO
+}
+
+static void argument_stack(char *argv[], int argc, struct intr_frame *if_) {
+	// TODO
+}
+
+int process_add_file(struct file *file) {
+	// TODO
+}
+
+struct file *process_get_file(int fd) {
+	// TODO
+}
+
+void process_close_file(int fd) {
+	// TODO
+}
+
+void process_close_all_files(void) {
+	// TODO
+}
 
 #else
 /* 여기부터 코드는 project 3 이후 사용됩니다.

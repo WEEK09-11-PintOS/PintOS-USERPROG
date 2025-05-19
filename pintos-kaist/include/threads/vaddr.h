@@ -56,4 +56,6 @@
 	((uint64_t) (vaddr) - (uint64_t) KERN_BASE);\
 })
 
+#define PHYS_BASE ((void *)0x80000000)
+
 #endif /* threads/vaddr.h */

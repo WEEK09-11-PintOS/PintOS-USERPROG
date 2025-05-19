@@ -5,6 +5,7 @@
 #include "threads/thread.h"
 #include "threads/loader.h"
 #include "userprog/gdt.h"
+#include "userprog/validate.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
 #include "lib/kernel/console.h"
@@ -14,7 +15,6 @@ void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 void check_address(void *addr);
 static int sys_write(int fd, const void *buffer, unsigned size);
-static void sys_exit(int);
 static void sys_halt();
 bool sys_create(const char *file, unsigned initial_size);
 bool strlcpy_user(char *dst, const char *src_user, size_t size);
@@ -123,7 +123,7 @@ static int sys_write(int fd, const void *buffer, unsigned size)
 	return -1;
 }
 
-static void sys_exit(int status)
+void sys_exit(int status)
 {
 	struct thread *cur = thread_current();
 	cur->exit_status = status;
