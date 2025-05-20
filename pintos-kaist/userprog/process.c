@@ -514,6 +514,7 @@ load(const char *file_name, struct intr_frame *if_)
 	if_->rip = ehdr.e_entry;
 
 	success = true;
+	sema_up(&thread_current()->fork_sema);
 	file_deny_write(file);
 	t->running_file = file;
 	goto done;
