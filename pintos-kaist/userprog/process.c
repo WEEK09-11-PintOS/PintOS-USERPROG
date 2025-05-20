@@ -17,7 +17,7 @@
 #include "threads/thread.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
-#include "intrinsic.h"
+#include "intrinsic.h" 
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -190,7 +190,6 @@ __do_fork(void *aux)
 	/* TODO: 이 아래에 코드를 작성해야 합니다.
 	 * TODO: 힌트) 파일 객체를 복제하려면 include/filesys/file.h의 `file_duplicate`를 사용하세요.
 	 * TODO:       이 함수가 부모의 자원을 성공적으로 복제할 때까지 부모는 fork()에서 반환되면 안 됩니다. */
-	
 	int fd_end = parent->next_FD;
 	
 	for (int i = 2; i < fd_end; i++){
@@ -556,7 +555,6 @@ load(const char *file_name, struct intr_frame *if_)
 			break;
 		}
 	}
-
 	/* 스택을 설정합니다. */
 	if (!setup_stack(if_))
 		goto done;
@@ -753,15 +751,6 @@ tid_t process_execute(const char *file_name) {
 }
 
 static void start_process(void *f_name) {
-	struct thread *curr = thread_current();
-
-	curr->FDT = malloc(sizeof(struct file *) * FDT_COUNT_LIMIT);
-	if(curr->FDT != NULL)
-		memset(curr->FDT, 0 , sizeof(struct file *) * FDT_COUNT_LIMIT);
-	curr->next_FD = 2;
-
-
-
 
 
 }
@@ -770,21 +759,66 @@ static void argument_stack(char *argv[], int argc, struct intr_frame *if_) {
 	// TODO
 }
 
+// 주어진 file 객체를 FDT에서 비어 있는 슬롯에 추가하고, 할당된 fd를 반환
+// 실패 시 -1 반환
 int process_add_file(struct file *file) {
-	// TODO
+	struct thread *curr = thread_current();
+
+	// fd는 0(stdin), 1(stdout)을 건너뛰고 2부터 시작
+	for (int fd = 2; fd < FDT_COUNT_LIMIT; fd++) {
+		// 비어 있는 슬롯 찾기
+		if (curr->FDT[fd] == NULL) {
+			curr->FDT[fd] = file;  // 파일 등록
+			return fd;             // 해당 fd 반환
+		}
+	}
+	return -1;  // 여유 공간 없음 → 실패
 }
 
+
+// 주어진 fd에 해당하는 파일 객체를 반환
+// 유효하지 않거나 열려 있지 않으면 NULL 반환
 struct file *process_get_file(int fd) {
-	// TODO
+	struct thread *curr = thread_current();
+
+	// stdin(0), stdout(1)은 시스템 콜에서 직접 처리하므로 제외
+	// 유효한 범위가 아니면 NULL
+	if (fd < 2 || fd >= FDT_COUNT_LIMIT) {
+		return NULL;
+	}
+
+	// FDT에서 해당 fd 위치의 파일 반환
+	return curr->FDT[fd];
 }
 
+
+// 주어진 fd에 해당하는 열린 파일을 닫고 FDT에서 제거
 void process_close_file(int fd) {
-	// TODO
+	struct thread *curr = thread_current();
+	
+	// stdin, stdout 제외 + 유효한 범위인지 확인
+	if (fd >= 2 && fd < FDT_COUNT_LIMIT) {
+		// 실제로 열려 있는 파일이 있으면 닫기
+		if (curr->FDT[fd] != NULL) {
+			file_close(curr->FDT[fd]);      // 파일 자원 해제
+			curr->FDT[fd] = NULL;           // FDT에서 제거
+		}
+	}
 }
 
+// 현재 프로세스가 열고 있는 모든 파일을 닫고 FDT를 초기화
 void process_close_all_files(void) {
-	// TODO
+	struct thread *curr = thread_current();
+
+	// fd = 2 이상부터 시작 → 유저 파일 디스크립터만 닫음
+	for (int fd = 2; fd < FDT_COUNT_LIMIT; fd++) {
+		if (curr->FDT[fd] != NULL) {
+			file_close(curr->FDT[fd]);      // 파일 닫기
+			curr->FDT[fd] = NULL;           // 슬롯 초기화
+		}
+	}
 }
+
 
 #else
 /* 여기부터 코드는 project 3 이후 사용됩니다.

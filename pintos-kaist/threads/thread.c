@@ -590,13 +590,13 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->magic = THREAD_MAGIC;
 
 
-
+	t->exit_status = 0;
+	t->next_FD = 2;
 	
 	sema_init(&t->wait_sema, 0);
 	sema_init(&t->exit_sema, 0);
 	sema_init(&t->fork_sema, 0);
 	list_init(&t->children);
-	t->next_FD = 2;
 
 
 	if (thread_mlfqs)
