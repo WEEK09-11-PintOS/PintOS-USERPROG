@@ -118,7 +118,6 @@ struct thread
 	struct file **FDT;			// File Descriptor Table
 	int next_FD;				// 다음 사용 가능한 fd값
 	struct file *running_file;	// 실행 중인 파일
-	bool has_been_waited;
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4; /* Page map level 4 */

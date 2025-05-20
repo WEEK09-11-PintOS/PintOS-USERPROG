@@ -305,7 +305,7 @@ process_wait (tid_t child_tid) {
 
 	struct thread *search_cur = get_child_by_tid(child_tid);
 	intr_set_level(old_level);
-	if (search_cur == NULL || search_cur->has_been_waited == true)
+	if (search_cur == NULL)
 		return -1;
 	
 	sema_down(&search_cur->wait_sema);
@@ -337,8 +337,6 @@ process_exit (void) {
 
 	//syscall의 exit에서 exit_status 설정이 선행되어야함
 	// printf("exit: %s: %d\n", thread_name(), cur->exit_status);
-
-	cur->has_been_waited = true;
 	
 	if (cur->parent != NULL){
 		sema_up(&cur->wait_sema);
