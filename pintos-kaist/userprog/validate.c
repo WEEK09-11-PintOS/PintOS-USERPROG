@@ -24,7 +24,7 @@ validate_ptr (const void *uaddr, size_t size) {
 
     while (left > 0) {
         if (!check_page (usr))
-            syscall_exit (-1);                    /* 잘못된 포인터 ⇒ 프로세스 종료 */
+            sys_exit (-1);                    /* 잘못된 포인터 ⇒ 프로세스 종료 */
 
         size_t page_left = PGSIZE - pg_ofs (usr); /* 현재 페이지에 남은 바이트 */
         size_t chunk     = left < page_left ? left : page_left;

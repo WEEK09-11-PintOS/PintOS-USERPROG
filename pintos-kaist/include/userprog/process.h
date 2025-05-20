@@ -10,6 +10,8 @@ int process_exec (void *f_name);
 int process_wait (tid_t);
 void process_exit (void);
 void process_activate (struct thread *next);
+
+tid_t process_execute(const char *file_name); // 실행 요청
 struct thread *get_child_by_tid(tid_t child_tid);
 
 // File System 관련 함수

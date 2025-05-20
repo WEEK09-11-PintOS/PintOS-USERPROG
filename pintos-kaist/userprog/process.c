@@ -32,9 +32,8 @@ static void __do_fork(void *);
 static int parse_args(char *, char *[]);
 static bool setup_stack(struct intr_frame *if_);
 
-tid_t process_execute(const char *file_name); // 실행 요청
-static void start_process(void *f_name);      // 실행 시작
-static void argument_stack(char *argv[], int argc, struct intr_frame *if_);
+static void start_process(void *f_name); // 실행 시작
+static void argument_stack(char *argv[], int argc, struct intr_frame *if_);	// 인자 전달
 
 /* General process initializer for initd and other process. */
 static void
@@ -721,7 +720,7 @@ static void argument_stack(char *argv[], int argc, struct intr_frame *if_) {
 		memcpy((void *)if_->rsp, argv[i], len);
 	}
 
-	// 8바이트 정렬
+	// 16바이트 정렬
 	if_->rsp = if_->rsp & ~0xF;
 
 	// NULL sentinel
