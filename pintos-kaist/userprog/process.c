@@ -24,6 +24,8 @@
 
 #define MAX_ARGS 128
 #define MAX_BUF 128
+#define FDT_COUNT_LIMIT 128
+
 
 static void process_cleanup(void);
 static bool load(const char *file_name, struct intr_frame *if_);
@@ -40,6 +42,10 @@ static void
 process_init(void)
 {
 	struct thread *current = thread_current();
+
+	current->FDT = palloc_get_page(PAL_ZERO);
+	current->running_file = NULL;
+	current->next_FD = 2;
 }
 
 /* 첫 번째 사용자 프로그램인 "initd"를 FILE_NAME에서 로드하여 시작합니다.
@@ -88,11 +94,21 @@ initd(void *f_name)
 /* 현재 프로세스를 `name`이라는 이름으로 복제합니다.
  * 새 프로세스의 스레드 ID를 반환하거나, 생성할 수 없으면 TID_ERROR를 반환합니다. */
 
-tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
+tid_t process_fork(const char *name, struct intr_frame *if_)
 {
-	/* Clone current thread to new thread.*/
-	return thread_create(name,
-						 PRI_DEFAULT, __do_fork, thread_current());
+	memcpy(&thread_current()->intr_frame, if_, sizeof(struct intr_frame));
+	tid_t fork_tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
+	struct thread *child = get_child_by_tid(fork_tid);
+
+	if (child != NULL) {
+	sema_down(&child->fork_sema); // 자식의 초기화가 끝날 때까지 대기
+	}
+
+	if(fork_tid == TID_ERROR)
+		return TID_ERROR;
+
+
+	return fork_tid;
 }
 
 #ifndef VM
@@ -108,23 +124,30 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	bool writable;
 
 	/* 1. TODO: parent_page가 커널 페이지이면 즉시 반환해야 합니다. */
+	if(is_kernel_vaddr(va))
+		return true;
 
 	/* 2. 부모의 page map level 4에서 VA를 해석합니다. */
 	parent_page = pml4_get_page(parent->pml4, va);
 
+	if(parent_page == NULL)
+		return false;
 	/* 3. TODO: 자식 프로세스를 위해 새로운 PAL_USER 페이지를 할당하고 결과를
 	 *    TODO: NEWPAGE에 저장해야 합니다. */
 
+	newpage = palloc_get_page(PAL_USER | PAL_ZERO);
+	if(newpage == NULL)
+		return false;
 	/* 4. TODO: 부모 페이지를 새 페이지에 복사하고
 	 *    TODO: 부모 페이지가 쓰기 가능한지 여부를 검사합니다.
 	 *    TODO: 결과에 따라 WRITABLE을 설정합니다. */
 
+	memcpy(newpage, parent_page, PGSIZE);
 	/* 5. VA 주소에 WRITABLE 권한으로 새 페이지를 자식의 페이지 테이블에 추가합니다. */
 
+	writable = is_writable(pte);
 	if (!pml4_set_page(current->pml4, va, newpage, writable))
-	{
-		/* 6. TODO: 페이지 삽입 실패 시 에러 핸들링을 해야 합니다. */
-	}
+		return false;
 	return true;
 }
 #endif
@@ -138,9 +161,12 @@ __do_fork(void *aux)
 	struct intr_frame if_;
 	struct thread *parent = (struct thread *)aux;
 	struct thread *current = thread_current();
-	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
+	struct intr_frame *parent_if = &parent->intr_frame;
 	bool succ = true;
+
+
+	process_init();
+
 
 	/* 1. CPU 컨텍스트를 지역 스택으로 복사합니다. */
 	memcpy(&if_, parent_if, sizeof(struct intr_frame));
@@ -163,10 +189,26 @@ __do_fork(void *aux)
 	/* TODO: 이 아래에 코드를 작성해야 합니다.
 	 * TODO: 힌트) 파일 객체를 복제하려면 include/filesys/file.h의 `file_duplicate`를 사용하세요.
 	 * TODO:       이 함수가 부모의 자원을 성공적으로 복제할 때까지 부모는 fork()에서 반환되면 안 됩니다. */
+	
+	int fd_end = parent->next_FD;
+	
+	for (int i = 2; i < fd_end; i++){
+        struct file *file = parent->FDT[i];
+		if (file != NULL)
+   			current->FDT[i] = file_duplicate(file);
+    }
 
-	process_init();
+	current->next_FD = fd_end;
+
+	
+
+	if_.R.rax = 0;
+	if_.ds = if_.es = if_.ss = SEL_UDSEG;
+	if_.cs = SEL_UCSEG;
+	if_.eflags = FLAG_IF;
 
 	/* 마침내 새로 생성된 프로세스로 전환합니다. */
+	sema_up(&current->fork_sema);
 	if (succ)
 		do_iret(&if_);
 error:
@@ -259,7 +301,7 @@ process_wait (tid_t child_tid) {
 
 	struct thread *search_cur = get_child_by_tid(child_tid);
 	intr_set_level(old_level);
-	if (search_cur == NULL)
+	if (search_cur == NULL || search_cur->has_been_waited == true)
 		return -1;
 	
 	sema_down(&search_cur->wait_sema);
@@ -291,8 +333,12 @@ process_exit (void) {
 
 	palloc_free_page(cur->FDT);
 
+	file_close(cur->running_file);
+
 	//syscall의 exit에서 exit_status 설정이 선행되어야함
 	// printf("exit: %s: %d\n", thread_name(), cur->exit_status);
+
+	cur->has_been_waited = true;
 	
 	if (cur->parent != NULL){
 		sema_up(&cur->wait_sema);
@@ -700,6 +746,13 @@ tid_t process_execute(const char *file_name) {
 }
 
 static void start_process(void *f_name) {
+	struct thread *curr = thread_current();
+
+	curr->FDT = malloc(sizeof(struct file *) * FDT_COUNT_LIMIT);
+	if(curr->FDT != NULL)
+		memset(curr->FDT, 0 , sizeof(struct file *) * FDT_COUNT_LIMIT);
+	curr->next_FD = 2;
+
 	if (process_exec(f_name) == -1) {
 		// 실패한 경우에만 여기 도달
 		struct thread *curr = thread_current();

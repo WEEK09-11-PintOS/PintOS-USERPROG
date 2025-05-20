@@ -113,11 +113,12 @@ struct thread
 	struct list children;              // 자식 프로세스 리스트
     struct list_elem child_elem;      // 부모의 children 리스트에 들어갈 element
     struct thread *parent;            // 부모 프로세스 포인터
+	struct intr_frame intr_frame;
 
 	struct file **FDT;			// File Descriptor Table
 	int next_FD;				// 다음 사용 가능한 fd값
 	struct file *running_file;	// 실행 중인 파일
-
+	bool has_been_waited;
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4; /* Page map level 4 */

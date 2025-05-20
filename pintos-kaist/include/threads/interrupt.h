@@ -72,7 +72,7 @@ void intr_register_int (uint8_t vec, int dpl, enum intr_level,
 bool intr_context (void);
 void intr_yield_on_return (void);
 
-void intr_dump_frame (const struct intr_frame *);
+void intr_dump_frame (const struct intr_frame *f);
 const char *intr_name (uint8_t vec);
 
 #endif /* threads/interrupt.h */

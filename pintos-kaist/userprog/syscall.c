@@ -11,6 +11,7 @@
 #include "intrinsic.h"
 #include "lib/kernel/console.h"
 #include "filesys/directory.h"
+#include "userprog/process.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -71,6 +72,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		sys_exit(arg1);
 		break;
 	case SYS_FORK:
+		f->R.rax = process_fork(arg1, f);
 		break;
 	case SYS_EXEC:
 		f->R.rax = sys_exec((const char *)arg1);
@@ -95,6 +97,10 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		break;
 	case SYS_CLOSE:
 		break;
+	case SYS_WAIT:
+		f->R.rax = process_wait(arg1);
+		break;
+
 	default:
 		thread_exit();
 		break;
