@@ -17,7 +17,7 @@
 #include "threads/thread.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
-#include "intrinsic.h"
+#include "intrinsic.h" 
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -33,9 +33,7 @@ static void initd(void *f_name);
 static void __do_fork(void *);
 static int parse_args(char *, char *[]);
 static bool setup_stack(struct intr_frame *if_);
-
-static void start_process(void *f_name); // 실행 시작
-static void argument_stack(char *argv[], int argc, struct intr_frame *if_);	// 인자 전달
+static void argument_stack(char *argv[], int argc, struct intr_frame *if_);
 
 /* General process initializer for initd and other process. */
 static void
@@ -106,7 +104,6 @@ tid_t process_fork(const char *name, struct intr_frame *if_)
 
 	if(fork_tid == TID_ERROR)
 		return TID_ERROR;
-
 
 	return fork_tid;
 }
@@ -198,6 +195,8 @@ __do_fork(void *aux)
     }
 
 	current->next_FD = fd_end;
+
+	
 
 	if_.R.rax = 0;
 	if_.ds = if_.es = if_.ss = SEL_UDSEG;
@@ -297,7 +296,7 @@ process_wait (tid_t child_tid) {
 
 	struct thread *search_cur = get_child_by_tid(child_tid);
 	intr_set_level(old_level);
-	if (search_cur == NULL || search_cur->has_been_waited == true)
+	if (search_cur == NULL)
 		return -1;
 	
 	sema_down(&search_cur->wait_sema);
@@ -320,12 +319,8 @@ process_exit (void) {
 		cur->FDT[i] = NULL;
 	}
 	
-	// 실행 중인 파일 해제
-	if (thread_current()->running_file != NULL) {
-		file_allow_write(thread_current()->running_file);
-		file_close(thread_current()->running_file);
-		thread_current()->running_file = NULL;
-	}
+	// //실행 중ㅇ인 파일에 대한 별도 처리 필요 ex cur->runngin_file
+
 
 	palloc_free_page(cur->FDT);
 
@@ -333,8 +328,6 @@ process_exit (void) {
 
 	//syscall의 exit에서 exit_status 설정이 선행되어야함
 	// printf("exit: %s: %d\n", thread_name(), cur->exit_status);
-
-	cur->has_been_waited = true;
 	
 	if (cur->parent != NULL){
 		sema_up(&cur->wait_sema);
@@ -713,6 +706,15 @@ install_page(void *upage, void *kpage, bool writable)
 	return (pml4_get_page(t->pml4, upage) == NULL && pml4_set_page(t->pml4, upage, kpage, writable));
 }
 
+tid_t process_execute(const char *file_name) {
+	// TODO
+}
+
+static void start_process(void *f_name) {
+
+
+}
+
 static void argument_stack(char *argv[], int argc, struct intr_frame *if_) {
 	uint64_t rsp_arr[argc];
 
@@ -751,21 +753,66 @@ static void argument_stack(char *argv[], int argc, struct intr_frame *if_) {
 	if_->R.rsi = if_->rsp + 8;
 }
 
+// 주어진 file 객체를 FDT에서 비어 있는 슬롯에 추가하고, 할당된 fd를 반환
+// 실패 시 -1 반환
 int process_add_file(struct file *file) {
-	// TODO
+	struct thread *curr = thread_current();
+
+	// fd는 0(stdin), 1(stdout)을 건너뛰고 2부터 시작
+	for (int fd = 2; fd < FDT_COUNT_LIMIT; fd++) {
+		// 비어 있는 슬롯 찾기
+		if (curr->FDT[fd] == NULL) {
+			curr->FDT[fd] = file;  // 파일 등록
+			return fd;             // 해당 fd 반환
+		}
+	}
+	return -1;  // 여유 공간 없음 → 실패
 }
 
+
+// 주어진 fd에 해당하는 파일 객체를 반환
+// 유효하지 않거나 열려 있지 않으면 NULL 반환
 struct file *process_get_file(int fd) {
-	// TODO
+	struct thread *curr = thread_current();
+
+	// stdin(0), stdout(1)은 시스템 콜에서 직접 처리하므로 제외
+	// 유효한 범위가 아니면 NULL
+	if (fd < 2 || fd >= FDT_COUNT_LIMIT) {
+		return NULL;
+	}
+
+	// FDT에서 해당 fd 위치의 파일 반환
+	return curr->FDT[fd];
 }
 
+
+// 주어진 fd에 해당하는 열린 파일을 닫고 FDT에서 제거
 void process_close_file(int fd) {
-	// TODO
+	struct thread *curr = thread_current();
+	
+	// stdin, stdout 제외 + 유효한 범위인지 확인
+	if (fd >= 2 && fd < FDT_COUNT_LIMIT) {
+		// 실제로 열려 있는 파일이 있으면 닫기
+		if (curr->FDT[fd] != NULL) {
+			file_close(curr->FDT[fd]);      // 파일 자원 해제
+			curr->FDT[fd] = NULL;           // FDT에서 제거
+		}
+	}
 }
 
+// 현재 프로세스가 열고 있는 모든 파일을 닫고 FDT를 초기화
 void process_close_all_files(void) {
-	// TODO
+	struct thread *curr = thread_current();
+
+	// fd = 2 이상부터 시작 → 유저 파일 디스크립터만 닫음
+	for (int fd = 2; fd < FDT_COUNT_LIMIT; fd++) {
+		if (curr->FDT[fd] != NULL) {
+			file_close(curr->FDT[fd]);      // 파일 닫기
+			curr->FDT[fd] = NULL;           // 슬롯 초기화
+		}
+	}
 }
+
 
 #else
 /* 여기부터 코드는 project 3 이후 사용됩니다.

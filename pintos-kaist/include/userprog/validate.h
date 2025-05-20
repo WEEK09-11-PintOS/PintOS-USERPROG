@@ -10,6 +10,7 @@
  *   ③ 매핑(pml4_get_page) 존재
  * 중 하나라도 틀리면 syscall_exit(-1) 로 즉시 종료한다. */
 void    validate_ptr (const void *uaddr, size_t size);
+void    validate_str (const char *str);
 
 /* 유저 → 커널 안전 복사.
  * size 바이트 전부 복사 실패 시 syscall_exit(-1). */

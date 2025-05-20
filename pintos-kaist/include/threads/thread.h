@@ -30,6 +30,9 @@ typedef int tid_t;
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63	   /* Highest priority. */
 
+#define FDT_PAGES 2
+#define FDT_COUNT_LIMIT 128
+
 /* A kernel thread or user process.
  *
  * Each thread structure is stored in its own 4 kB page.  The
@@ -118,7 +121,6 @@ struct thread
 	struct file **FDT;			// File Descriptor Table
 	int next_FD;				// 다음 사용 가능한 fd값
 	struct file *running_file;	// 실행 중인 파일
-	bool has_been_waited;
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4; /* Page map level 4 */
