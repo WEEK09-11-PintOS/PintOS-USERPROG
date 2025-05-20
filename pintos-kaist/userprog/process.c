@@ -189,7 +189,6 @@ __do_fork(void *aux)
 	/* TODO: 이 아래에 코드를 작성해야 합니다.
 	 * TODO: 힌트) 파일 객체를 복제하려면 include/filesys/file.h의 `file_duplicate`를 사용하세요.
 	 * TODO:       이 함수가 부모의 자원을 성공적으로 복제할 때까지 부모는 fork()에서 반환되면 안 됩니다. */
-	
 	int fd_end = parent->next_FD;
 	
 	for (int i = 2; i < fd_end; i++){
@@ -199,8 +198,6 @@ __do_fork(void *aux)
     }
 
 	current->next_FD = fd_end;
-
-	
 
 	if_.R.rax = 0;
 	if_.ds = if_.es = if_.ss = SEL_UDSEG;
@@ -239,12 +236,11 @@ int process_exec(void *f_name)
 	success = load(argv[0], &_if);
 	argument_stack(argv, argc, &_if);
 
+	palloc_free_page(f_name);
 	/* 로드 실패 시 종료합니다. */
 	if (!success) {
-		palloc_free_page(f_name);
 		return -1;
 	}
-	palloc_free_page(f_name);
 
 	// hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)_if.rsp, true);
 	/* 프로세스를 전환합니다. */
@@ -560,7 +556,6 @@ load(const char *file_name, struct intr_frame *if_)
 	if_->rip = ehdr.e_entry;
 
 	success = true;
-	sema_up(&thread_current()->fork_sema);
 	file_deny_write(file);
 	t->running_file = file;
 	goto done;
@@ -716,50 +711,6 @@ install_page(void *upage, void *kpage, bool writable)
 	/* Verify that there's not already a page at that virtual
 	 * address, then map our page there. */
 	return (pml4_get_page(t->pml4, upage) == NULL && pml4_set_page(t->pml4, upage, kpage, writable));
-}
-
-tid_t process_execute(const char *file_name) {
-	char *fn_copy;
-	tid_t child_tid;
-
-	fn_copy = palloc_get_page(0);
-	if (fn_copy == NULL) {
-		return TID_ERROR;
-	}
-
-	strlcpy (fn_copy, file_name, PGSIZE);
-
-	child_tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
-	if (child_tid == TID_ERROR) {
-		palloc_free_page(fn_copy);	// 부모가 직접 회수
-		return TID_ERROR;
-	}
-	struct thread *child = get_child_by_tid(child_tid);
-	ASSERT (child != NULL);	// 리스트에서 찾지 못하면 버그
-
-	sema_down(&child->fork_sema);	// load 완료 대기
-
-	if (child->exit_status == -1) {
-		return TID_ERROR;	// 자식이 fn_copy를 이미 회수
-	}
-	return child_tid;
-}
-
-static void start_process(void *f_name) {
-	struct thread *curr = thread_current();
-
-	curr->FDT = malloc(sizeof(struct file *) * FDT_COUNT_LIMIT);
-	if(curr->FDT != NULL)
-		memset(curr->FDT, 0 , sizeof(struct file *) * FDT_COUNT_LIMIT);
-	curr->next_FD = 2;
-
-	if (process_exec(f_name) == -1) {
-		// 실패한 경우에만 여기 도달
-		struct thread *curr = thread_current();
-		curr->exit_status = -1;
-		sema_up(&curr->fork_sema);
-		process_exit();
-	}
 }
 
 static void argument_stack(char *argv[], int argc, struct intr_frame *if_) {

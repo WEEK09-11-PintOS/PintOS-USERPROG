@@ -4,6 +4,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
+#include "threads/palloc.h"
 #include "userprog/gdt.h"
 #include "userprog/process.h"
 #include "userprog/validate.h"
@@ -11,7 +12,6 @@
 #include "intrinsic.h"
 #include "lib/kernel/console.h"
 #include "filesys/directory.h"
-#include "userprog/process.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -75,7 +75,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		f->R.rax = process_fork(arg1, f);
 		break;
 	case SYS_EXEC:
-		f->R.rax = sys_exec((const char *)arg1);
+		f->R.rax = sys_exec((void *)arg1);
 		break;
 	case SYS_CREATE:
 		f->R.rax = sys_create(arg1, arg2);
@@ -184,20 +184,15 @@ bool strlcpy_user(char *dst, const char *src_user, size_t size) {
 }
 
 static tid_t sys_exec(const char *cmd_line) {
-	validate_ptr(cmd_line, 1);
+	validate_str(cmd_line);
 
-	char *kbuf = palloc_get_page(0);
-	if (kbuf == NULL) return -1;
+	char *cmd_line_copy = palloc_get_page(PAL_ZERO);
+	if (cmd_line_copy == NULL) {
+		sys_exit(-1);
+	}
+	strlcpy(cmd_line_copy, cmd_line, PGSIZE);	// 커널 버퍼에 복사 (안전성)
 
-	strlcpy(kbuf, cmd_line, PGSIZE);	// 커널 버퍼에 복사 (안전성)
-
-	tid_t tid = process_execute(kbuf);	// page는 자식이 free
-	palloc_free_page(kbuf);	// 복사가 끝났으므로 kbuf 해제
-
-	if (tid == TID_ERROR)
-		return -1;
-
-	int status = process_wait(tid);     // 자식 종료를 기다림
-
-	return (status == -1) ? TID_ERROR : tid;
+	if (process_exec(cmd_line_copy) == -1) {
+		sys_exit(-1);
+	}
 }

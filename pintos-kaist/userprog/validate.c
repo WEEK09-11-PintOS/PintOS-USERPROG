@@ -10,11 +10,11 @@
 static bool
 check_page (const void *uaddr) {
     return uaddr != NULL &&
-           uaddr < PHYS_BASE &&
+           is_user_vaddr(uaddr) &&
            pml4_get_page (thread_current ()->pml4, uaddr) != NULL;
 }
 
-/* uaddr ~ uaddr+size-1 범위를 페이지 단위로 스캔 */
+/* uaddr ~ uaddr+size-1 범위를 페이지 단위로 검증 (고정된 물리적 범위) */
 void
 validate_ptr (const void *uaddr, size_t size) {
     if (size == 0) return;                        /* 길이 0 → no-op */
@@ -32,6 +32,14 @@ validate_ptr (const void *uaddr, size_t size) {
         usr  += chunk;
         left -= chunk;
     }
+}
+
+/* \0 문자가 나올 때까지 한 글자씩 따라가며 검증 (가변적인 논리적 길이)*/
+void validate_str(const char *str) {
+	for (const char *p = str;; ++p) {
+		validate_ptr(p, 1);  // 한 바이트라도 접근 가능해야 함
+		if (*p == '\0') break;
+	}
 }
 
 /* 유저 → 커널 복사 */
