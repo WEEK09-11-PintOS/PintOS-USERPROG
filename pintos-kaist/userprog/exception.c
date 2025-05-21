@@ -150,7 +150,9 @@ page_fault (struct intr_frame *f) {
 	/* Count page faults. */
 	page_fault_cnt++;
 
-	if (user && (!not_present || fault_addr >= PHYS_BASE))
+	// 추후 VM 프로젝트 시 수정 필요
+	if (user) {
     	sys_exit(-1);
+	}
 }
 
