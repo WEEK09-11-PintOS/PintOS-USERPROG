@@ -151,7 +151,7 @@ page_fault (struct intr_frame *f) {
 	page_fault_cnt++;
 
 	// 추후 VM 프로젝트 시 수정 필요
-	if (user) {
+	if (user || (write && !not_present)) {
     	sys_exit(-1);
 	}
 }

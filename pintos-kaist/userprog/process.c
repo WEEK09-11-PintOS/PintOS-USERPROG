@@ -231,13 +231,14 @@ int process_exec(void *f_name)
 	/* 그리고 이진 파일을 로드합니다. */
 	ASSERT(argv[0] != NULL);
 	success = load(argv[0], &_if);
-	argument_stack(argv, argc, &_if);
 
-	palloc_free_page(f_name);
 	/* 로드 실패 시 종료합니다. */
 	if (!success) {
+		palloc_free_page(f_name);
 		return -1;
 	}
+	argument_stack(argv, argc, &_if);
+	palloc_free_page(f_name);
 
 	// hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)_if.rsp, true);
 	/* 프로세스를 전환합니다. */
@@ -318,7 +319,6 @@ process_exit (void) {
 	}
 	
 	// 실행 중인 파일에 대한 별도 처리 필요 ex cur->runngin_file
-	cur->running_file = NULL;
 
 	palloc_free_page(cur->FDT);
 
