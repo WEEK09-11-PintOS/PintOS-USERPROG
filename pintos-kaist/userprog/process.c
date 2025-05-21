@@ -187,12 +187,26 @@ __do_fork(void *aux)
 	 * TODO: 힌트) 파일 객체를 복제하려면 include/filesys/file.h의 `file_duplicate`를 사용하세요.
 	 * TODO:       이 함수가 부모의 자원을 성공적으로 복제할 때까지 부모는 fork()에서 반환되면 안 됩니다. */
 	int fd_end = parent->next_FD;
-	
-	for (int i = 2; i < fd_end; i++){
+
+	for (int i = 0; i < fd_end; i++){
         struct file *file = parent->FDT[i];
 		if (file != NULL)
    			current->FDT[i] = file_duplicate(file);
     }
+
+
+
+	// current->FDT = palloc_get_page(PAL_ZERO);
+	// if (current->FDT == NULL)
+	// 	goto error;
+
+	// for (int i = 0; i < FDT_COUNT_LIMIT; i++) {
+	// 	struct file *f = parent->FDT[i];
+	// 	if (f != NULL)
+	// 		current->FDT[i] = file_duplicate(f);
+	// }
+	// current->next_FD = parent->next_FD;
+
 
 	current->next_FD = fd_end;
 
@@ -313,7 +327,7 @@ void
 process_exit (void) {
 	struct thread *cur = thread_current ();
 
-	for(int i = 2; i<cur->next_FD; i++){
+	for(int i = 0; i<cur->next_FD; i++){
 		if (cur->FDT[i] != NULL)
 			file_close(cur->FDT[i]);
 		cur->FDT[i] = NULL;
@@ -763,6 +777,8 @@ int process_add_file(struct file *file) {
 		// 비어 있는 슬롯 찾기
 		if (curr->FDT[fd] == NULL) {
 			curr->FDT[fd] = file;  // 파일 등록
+			if (curr->next_FD <= fd)
+				curr->next_FD = fd + 1;
 			return fd;             // 해당 fd 반환
 		}
 	}
