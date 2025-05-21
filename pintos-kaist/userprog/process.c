@@ -194,23 +194,7 @@ __do_fork(void *aux)
    			current->FDT[i] = file_duplicate(file);
     }
 
-
-
-	// current->FDT = palloc_get_page(PAL_ZERO);
-	// if (current->FDT == NULL)
-	// 	goto error;
-
-	// for (int i = 0; i < FDT_COUNT_LIMIT; i++) {
-	// 	struct file *f = parent->FDT[i];
-	// 	if (f != NULL)
-	// 		current->FDT[i] = file_duplicate(f);
-	// }
-	// current->next_FD = parent->next_FD;
-
-
 	current->next_FD = fd_end;
-
-	
 
 	if_.R.rax = 0;
 	if_.ds = if_.es = if_.ss = SEL_UDSEG;
@@ -327,14 +311,14 @@ void
 process_exit (void) {
 	struct thread *cur = thread_current ();
 
-	for(int i = 0; i<cur->next_FD; i++){
+	for(int i = 3; i<cur->next_FD; i++){
 		if (cur->FDT[i] != NULL)
 			file_close(cur->FDT[i]);
 		cur->FDT[i] = NULL;
 	}
 	
-	// //실행 중ㅇ인 파일에 대한 별도 처리 필요 ex cur->runngin_file
-
+	// 실행 중인 파일에 대한 별도 처리 필요 ex cur->runngin_file
+	cur->running_file = NULL;
 
 	palloc_free_page(cur->FDT);
 
@@ -720,15 +704,6 @@ install_page(void *upage, void *kpage, bool writable)
 	return (pml4_get_page(t->pml4, upage) == NULL && pml4_set_page(t->pml4, upage, kpage, writable));
 }
 
-tid_t process_execute(const char *file_name) {
-	// TODO
-}
-
-static void start_process(void *f_name) {
-
-
-}
-
 static void argument_stack(char *argv[], int argc, struct intr_frame *if_) {
 	uint64_t rsp_arr[argc];
 
@@ -772,8 +747,8 @@ static void argument_stack(char *argv[], int argc, struct intr_frame *if_) {
 int process_add_file(struct file *file) {
 	struct thread *curr = thread_current();
 
-	// fd는 0(stdin), 1(stdout)을 건너뛰고 2부터 시작
-	for (int fd = 2; fd < FDT_COUNT_LIMIT; fd++) {
+	// fd는 0(stdin), 1(stdout), 2(stderr)을 건너뛰고 3부터 시작
+	for (int fd = 3; fd < FDT_COUNT_LIMIT; fd++) {
 		// 비어 있는 슬롯 찾기
 		if (curr->FDT[fd] == NULL) {
 			curr->FDT[fd] = file;  // 파일 등록
@@ -791,9 +766,9 @@ int process_add_file(struct file *file) {
 struct file *process_get_file(int fd) {
 	struct thread *curr = thread_current();
 
-	// stdin(0), stdout(1)은 시스템 콜에서 직접 처리하므로 제외
+	// stdin(0), stdout(1), stderr(2)은 시스템 콜에서 직접 처리하므로 제외
 	// 유효한 범위가 아니면 NULL
-	if (fd < 2 || fd >= FDT_COUNT_LIMIT) {
+	if (fd < 3 || fd >= FDT_COUNT_LIMIT) {
 		return NULL;
 	}
 
@@ -806,8 +781,8 @@ struct file *process_get_file(int fd) {
 void process_close_file(int fd) {
 	struct thread *curr = thread_current();
 	
-	// stdin, stdout 제외 + 유효한 범위인지 확인
-	if (fd >= 2 && fd < FDT_COUNT_LIMIT) {
+	// stdin, stdout, stderr 제외 + 유효한 범위인지 확인
+	if (fd >= 3 && fd < FDT_COUNT_LIMIT) {
 		// 실제로 열려 있는 파일이 있으면 닫기
 		if (curr->FDT[fd] != NULL) {
 			file_close(curr->FDT[fd]);      // 파일 자원 해제
@@ -820,8 +795,8 @@ void process_close_file(int fd) {
 void process_close_all_files(void) {
 	struct thread *curr = thread_current();
 
-	// fd = 2 이상부터 시작 → 유저 파일 디스크립터만 닫음
-	for (int fd = 2; fd < FDT_COUNT_LIMIT; fd++) {
+	// fd = 3 이상부터 시작 → 유저 파일 디스크립터만 닫음
+	for (int fd = 3; fd < FDT_COUNT_LIMIT; fd++) {
 		if (curr->FDT[fd] != NULL) {
 			file_close(curr->FDT[fd]);      // 파일 닫기
 			curr->FDT[fd] = NULL;           // 슬롯 초기화

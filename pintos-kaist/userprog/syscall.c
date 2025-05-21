@@ -30,6 +30,7 @@ unsigned sys_tell(int fd);
 bool sys_remove(const char *file);
 int sys_filesize(int fd);
 static tid_t sys_exec(const char *cmd_line);
+int sys_wait(int pid);
 
 /* 시스템 콜.
  *
@@ -116,7 +117,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		sys_close(arg1);
 		break;
 	case SYS_WAIT:
-		f->R.rax = process_wait(arg1);
+		f->R.rax = sys_wait(arg1);
 		break;
 
 	default:
