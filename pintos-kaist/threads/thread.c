@@ -193,6 +193,7 @@ tid_t thread_create(const char *name, int priority,
 	struct thread *t;
 	tid_t tid;
 
+	struct thread *cur = thread_current();
 	ASSERT(function != NULL);
 
 	/* Allocate thread. */
@@ -212,13 +213,6 @@ tid_t thread_create(const char *name, int priority,
 	}
 
 	tid = t->tid = allocate_tid();
-	
-
-
-	//수정 가능성 있음
-    t->parent = thread_current();
-    list_push_back(&t->parent->children, &t->child_elem);
-
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -231,10 +225,13 @@ tid_t thread_create(const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 
+	/* 부모(cur)의 자식 리스트에 추가 */
+	list_push_back(&cur->children, &t->child_elem);
+
 	/* Add to run queue. */
 	thread_unblock(t);
 
-	struct thread *cur = thread_current();
+	ASSERT(&cur->children != NULL);
 
 	if (compare_priority(&t->elem, &cur->elem, NULL))
 		thread_yield();
@@ -409,8 +406,6 @@ void thread_exit(void)
 #ifdef USERPROG
 	process_exit();
 #endif
-	struct thread *cur = thread_current();
-	list_remove(&cur->all_elem);
 
 	/* Just set our status to dying and schedule another process.
 	   We will be destroyed during the call to schedule_tail(). */
@@ -589,16 +584,6 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->pending_lock = NULL;
 	t->magic = THREAD_MAGIC;
 
-
-	t->exit_status = 0;
-	t->next_FD = 2;
-	
-	sema_init(&t->wait_sema, 0);
-	sema_init(&t->exit_sema, 0);
-	sema_init(&t->fork_sema, 0);
-	list_init(&t->children);
-
-
 	if (thread_mlfqs)
 	{
 		if (t == initial_thread)
@@ -615,8 +600,11 @@ init_thread(struct thread *t, const char *name, int priority)
 		}
 	}
 
+	list_init(&t->children);
 	list_init(&t->donations);
 	list_push_back(&all_list, &t->all_elem);
+	sema_init(&t->wait_sema, 0);
+	sema_init(&t->exit_sema, 0);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -778,18 +766,8 @@ schedule(void)
 		   실제 파괴 로직은 schedule()의 시작 부분에서 호출됩니다. */
 		if (curr && curr->status == THREAD_DYING && curr != initial_thread)
 		{
-			if(!list_empty(&curr->children)){
-				struct list_elem *child = list_begin(&curr->children);
-				while (child != list_end(&curr->children)){
-					struct thread *child_t = list_entry(child, struct thread, child_elem);
-					child = list_remove(&child_t->child_elem);
-					child_t->parent = NULL;
-				}
-			}
-			
-			
 			ASSERT(curr != next);
-			list_push_back(&destruction_req, &curr->elem);
+			list_insert_ordered(&destruction_req, &curr->elem, compare_priority, NULL);
 		}
 
 		/* 스레드를 전환하기 전에, 현재 실행 중인 스레드의 정보를 먼저 저장합니다. */

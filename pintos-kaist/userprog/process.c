@@ -17,6 +17,7 @@
 #include "threads/thread.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 #include "intrinsic.h" 
 #ifdef VM
 #include "vm/vm.h"
@@ -41,9 +42,10 @@ process_init(void)
 {
 	struct thread *current = thread_current();
 
-	current->FDT = palloc_get_page(PAL_ZERO);
-	current->running_file = NULL;
+	current->FDT = palloc_get_multiple(PAL_ZERO, FDT_PAGES);
 	current->next_FD = 2;
+	ASSERT(current->FDT != NULL);
+	sema_init(&current->fork_sema, 0);
 }
 
 /* 첫 번째 사용자 프로그램인 "initd"를 FILE_NAME에서 로드하여 시작합니다.
@@ -92,20 +94,28 @@ initd(void *f_name)
 /* 현재 프로세스를 `name`이라는 이름으로 복제합니다.
  * 새 프로세스의 스레드 ID를 반환하거나, 생성할 수 없으면 TID_ERROR를 반환합니다. */
 
-tid_t process_fork(const char *name, struct intr_frame *if_)
+tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
 {
-	memcpy(&thread_current()->intr_frame, if_, sizeof(struct intr_frame));
-	tid_t fork_tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
-	struct thread *child = get_child_by_tid(fork_tid);
+	struct fork_info *info = malloc(sizeof(struct fork_info));
+	ASSERT(info != NULL);
+	struct thread *parent = thread_current();
+	info->parent = parent;
+	memcpy(&info->parent_if, if_, sizeof(struct intr_frame));
 
-	if (child != NULL) {
-	sema_down(&child->fork_sema); // 자식의 초기화가 끝날 때까지 대기
+	tid_t child_tid = thread_create(name, PRI_DEFAULT, __do_fork, info);
+
+	if (child_tid == TID_ERROR || child_tid == NULL) {
+		free(info);
+		return TID_ERROR;
 	}
 
-	if(fork_tid == TID_ERROR)
+	sema_down(&parent->fork_sema);
+	struct thread *child = get_child_by_tid(child_tid);
+	free(info);
+	if (child->exit_status == TID_ERROR) {
 		return TID_ERROR;
-
-	return fork_tid;
+	}
+	return child_tid;
 }
 
 #ifndef VM
@@ -128,7 +138,7 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	parent_page = pml4_get_page(parent->pml4, va);
 
 	if(parent_page == NULL)
-		return false;
+		return true;
 	/* 3. TODO: 자식 프로세스를 위해 새로운 PAL_USER 페이지를 할당하고 결과를
 	 *    TODO: NEWPAGE에 저장해야 합니다. */
 
@@ -143,8 +153,10 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	/* 5. VA 주소에 WRITABLE 권한으로 새 페이지를 자식의 페이지 테이블에 추가합니다. */
 
 	writable = is_writable(pte);
-	if (!pml4_set_page(current->pml4, va, newpage, writable))
+	if (!pml4_set_page(current->pml4, va, newpage, writable)) {
+		palloc_free_page(newpage);
 		return false;
+		}
 	return true;
 }
 #endif
@@ -155,14 +167,12 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 static void
 __do_fork(void *aux)
 {
+	struct fork_info *info = aux;
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *)aux;
+	struct thread *parent = info->parent;
 	struct thread *current = thread_current();
-	struct intr_frame *parent_if = &parent->intr_frame;
+	struct intr_frame *parent_if = &info->parent_if;
 	bool succ = true;
-
-
-	process_init();
 
 
 	/* 1. CPU 컨텍스트를 지역 스택으로 복사합니다. */
@@ -179,6 +189,9 @@ __do_fork(void *aux)
 	if (!supplemental_page_table_copy(&current->spt, &parent->spt))
 		goto error;
 #else
+	if (parent->pml4 == NULL)
+		printf("pml4 is null\n");
+
 	if (!pml4_for_each(parent->pml4, duplicate_pte, parent))
 		goto error;
 #endif
@@ -186,35 +199,39 @@ __do_fork(void *aux)
 	/* TODO: 이 아래에 코드를 작성해야 합니다.
 	 * TODO: 힌트) 파일 객체를 복제하려면 include/filesys/file.h의 `file_duplicate`를 사용하세요.
 	 * TODO:       이 함수가 부모의 자원을 성공적으로 복제할 때까지 부모는 fork()에서 반환되면 안 됩니다. */
-	int fd_end = parent->next_FD;
+	process_init();
 
-	for (int i = 0; i < fd_end; i++){
-        struct file *file = parent->FDT[i];
-		if (file != NULL)
-   			current->FDT[i] = file_duplicate(file);
-    }
+	if (parent->next_FD == MAX_FD)
+		goto error;
 
-	current->next_FD = fd_end;
+	for (int fd = 0; fd < MAX_FD; fd++) {
+		if (fd <= 1)
+			current->FDT[fd] = parent->FDT[fd];
+		else {
+			if (parent->FDT[fd] != NULL) 
+				current->FDT[fd] = file_duplicate(parent->FDT[fd]);
+		}
+	}
+	current->next_FD = parent->next_FD;
 
 	if_.R.rax = 0;
-	if_.ds = if_.es = if_.ss = SEL_UDSEG;
-	if_.cs = SEL_UCSEG;
-	if_.eflags = FLAG_IF;
-
+	
 	/* 마침내 새로 생성된 프로세스로 전환합니다. */
-	sema_up(&current->fork_sema);
+	sema_up(&parent->fork_sema);
 	if (succ)
 		do_iret(&if_);
 error:
-	thread_exit();
+	sema_up(&parent->fork_sema);
+	sys_exit(TID_ERROR);
 }
 
 /* 현재 실행 컨텍스트를 f_name으로 전환합니다.
  * 실패 시 -1을 반환합니다. */
 int process_exec(void *f_name)
 {
-	char *argv[MAX_ARGS];
-	int argc = parse_args(f_name, argv);
+	char *file_name = f_name;
+	char cp_file_name[MAX_BUF];
+	memcpy(cp_file_name, file_name, strlen(file_name) + 1);
 	bool success;
 
 	/* intr_frame을 thread 구조체 안의 것을 사용할 수 없습니다.
@@ -229,16 +246,14 @@ int process_exec(void *f_name)
 	process_cleanup();
 
 	/* 그리고 이진 파일을 로드합니다. */
-	ASSERT(argv[0] != NULL);
-	success = load(argv[0], &_if);
+	ASSERT(cp_file_name != NULL);
+	success = load(cp_file_name, &_if);
 
-	/* 로드 실패 시 종료합니다. */
-	if (!success) {
-		palloc_free_page(f_name);
+	palloc_free_page(file_name);
+	if (!success)
 		return -1;
-	}
-	argument_stack(argv, argc, &_if);
-	palloc_free_page(f_name);
+	thread_current()->running_file = filesys_open(cp_file_name);
+	file_deny_write(thread_current()->running_file);
 
 	// hex_dump(_if.rsp, _if.rsp, USER_STACK - (uint64_t)_if.rsp, true);
 	/* 프로세스를 전환합니다. */
@@ -272,72 +287,52 @@ static int parse_args(char *target, char *argv[])
  * 이 함수는 문제 2-2에서 구현될 예정입니다. 지금은 아무 것도 하지 않습니다. */
 struct thread 
 *get_child_by_tid(tid_t child_tid){
+	struct list_elem *e;
 	struct thread *cur = thread_current();
-	struct thread *v = NULL;
-
-	for(struct list_elem *i =list_begin(&cur->children); i != list_end(&cur->children); i = i->next){
-		struct thread *t = list_entry(i, struct thread, child_elem);
-		if(t->tid == child_tid){
-			v = t;
-			break;
-		}
-
+	for (e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e))
+	{
+		struct thread *child = list_entry(e, struct thread, child_elem);
+		if (child->tid == child_tid)
+			return child;
 	}
-	
-	return v;
+	return NULL;
 }
 
 int
-process_wait (tid_t child_tid) {
+process_wait (tid_t child_tid UNUSED) {
 	//for문으로 인자값 서치, 있으면 바로 child status 반환 없으면 블록
-	enum intr_level old_level = intr_disable();
 	struct thread *cur = thread_current();
+	if (list_empty(&cur->children))
+		return -1;
 
-	struct thread *search_cur = get_child_by_tid(child_tid);
-	intr_set_level(old_level);
-	if (search_cur == NULL)
+	struct thread *child = get_child_by_tid(child_tid);
+	if (child == NULL)
 		return -1;
 	
-	sema_down(&search_cur->wait_sema);
-	int stat = search_cur->exit_status;
-	list_remove(&search_cur->child_elem);
-
-	sema_up(&search_cur->exit_sema);
-
-	return stat;
+	sema_down(&child->wait_sema);
+	int status = child->exit_status;
+	list_remove(&child->child_elem);
+	sema_up(&child->exit_sema);
+	if (status < 0)
+		return -1;
+	return status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void
 process_exit (void) {
 	struct thread *cur = thread_current ();
-
-	for(int i = 3; i<cur->next_FD; i++){
-		if (cur->FDT[i] != NULL)
-			file_close(cur->FDT[i]);
-		cur->FDT[i] = NULL;
-	}
 	
 	// 실행 중인 파일에 대한 별도 처리 필요 ex cur->runngin_file
 
-	palloc_free_page(cur->FDT);
+	palloc_free_multiple(cur->FDT, FDT_PAGES);
 
-	file_close(cur->running_file);
-
-	//syscall의 exit에서 exit_status 설정이 선행되어야함
-	// printf("exit: %s: %d\n", thread_name(), cur->exit_status);
-	
-	if (cur->parent != NULL){
-		sema_up(&cur->wait_sema);
+	if (cur->running_file != NULL) {
+		file_allow_write(cur->running_file);
+		file_close(cur->running_file);
 	}
-
-	//이 사이에 부모가 삭제될 수도 있으니 분기 또한 구별
-	if (cur->parent != NULL){
-		sema_down(&cur->exit_sema);
-	}
-	//근데 부모 스레드가 wait을 안걸면 어떻게 되는거지...? down이 해제가 안되나..?
-	//전제 조건 1: wait / exit sema 둘다 0으로 기본 세팅 되어있어야함
-	//전제 조건 2: thread_exit 내부 로직에 자식 스레드 관련 부모 삭제와 sema up 처리가 추가되어야함
+	sema_up(&cur->wait_sema);
+	sema_down(&cur->exit_sema);
 	process_cleanup ();
 }
 
@@ -452,6 +447,11 @@ load(const char *file_name, struct intr_frame *if_)
 	struct file *file = NULL;
 	off_t file_ofs;
 	bool success = false;
+	int i;
+
+	char *argv[MAX_ARGS];
+	int argc = parse_args(file_name, argv);
+	uint64_t rsp_arr[argc];
 
 	/* 페이지 디렉터리를 할당하고 활성화합니다. */
 	t->pml4 = pml4_create();
@@ -546,15 +546,39 @@ load(const char *file_name, struct intr_frame *if_)
 	/* 시작 주소를 설정합니다. */
 	if_->rip = ehdr.e_entry;
 
+	for (int i = argc - 1; i >= 0; i--)
+	{
+		if_->rsp -= strlen(argv[i]) + 1;
+		rsp_arr[i] = if_->rsp;
+		memcpy((void *)if_->rsp, argv[i], strlen(argv[i]) + 1);
+	}
+
+	while (if_->rsp % 8 != 0)
+	{
+		if_->rsp--;				  // 주소값을 1 내리고
+		*(uint8_t *)if_->rsp = 0; // 데이터에 0 삽입 => 8바이트 저장
+	}
+
+	if_->rsp -= 8; // NULL 문자열을 위한 주소 공간, 64비트니까 8바이트 확보
+	memset(if_->rsp, 0, sizeof(char **));
+
+	for (int i = argc - 1; i >= 0; i--)
+	{
+		if_->rsp -= 8; // 8바이트만큼 rsp감소
+		memcpy(if_->rsp, &rsp_arr[i], sizeof(char **));
+	}
+
+	if_->rsp -= 8;
+	memset(if_->rsp, 0, sizeof(void *));
+
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp + 8;
+
 	success = true;
-	file_deny_write(file);
-	t->running_file = file;
-	goto done;
 
 done:
 	/* load의 성공 여부와 상관없이 여기로 도달 */
-	if (!success && file != NULL)
-		file_close(file); // 성공하지 못한 경우에만 닫음
+	file_close(file); // 성공하지 못한 경우에만 닫음
 	return success;
 }
 
@@ -748,7 +772,7 @@ int process_add_file(struct file *file) {
 	struct thread *curr = thread_current();
 
 	// fd는 0(stdin), 1(stdout), 2(stderr)을 건너뛰고 3부터 시작
-	for (int fd = 3; fd < FDT_COUNT_LIMIT; fd++) {
+	for (int fd = 3; fd < MAX_FD; fd++) {
 		// 비어 있는 슬롯 찾기
 		if (curr->FDT[fd] == NULL) {
 			curr->FDT[fd] = file;  // 파일 등록
@@ -768,7 +792,7 @@ struct file *process_get_file(int fd) {
 
 	// stdin(0), stdout(1), stderr(2)은 시스템 콜에서 직접 처리하므로 제외
 	// 유효한 범위가 아니면 NULL
-	if (fd < 3 || fd >= FDT_COUNT_LIMIT) {
+	if (fd < 3 || fd >= MAX_FD) {
 		return NULL;
 	}
 
@@ -782,7 +806,7 @@ void process_close_file(int fd) {
 	struct thread *curr = thread_current();
 	
 	// stdin, stdout, stderr 제외 + 유효한 범위인지 확인
-	if (fd >= 3 && fd < FDT_COUNT_LIMIT) {
+	if (fd >= 3 && fd < MAX_FD) {
 		// 실제로 열려 있는 파일이 있으면 닫기
 		if (curr->FDT[fd] != NULL) {
 			file_close(curr->FDT[fd]);      // 파일 자원 해제
@@ -796,7 +820,7 @@ void process_close_all_files(void) {
 	struct thread *curr = thread_current();
 
 	// fd = 3 이상부터 시작 → 유저 파일 디스크립터만 닫음
-	for (int fd = 3; fd < FDT_COUNT_LIMIT; fd++) {
+	for (int fd = 3; fd < MAX_FD; fd++) {
 		if (curr->FDT[fd] != NULL) {
 			file_close(curr->FDT[fd]);      // 파일 닫기
 			curr->FDT[fd] = NULL;           // 슬롯 초기화
