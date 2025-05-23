@@ -192,7 +192,7 @@ __do_fork(void *aux)
 	 * TODO:       이 함수가 부모의 자원을 성공적으로 복제할 때까지 부모는 fork()에서 반환되면 안 됩니다. */
 	int fd_end = parent->next_FD;
 
-	for (int fd = 0; fd < MAX_FD; fd++) {
+	for (int fd = 0; fd < fd_end; fd++) {
 		if (fd <= 2)
 			current->FDT[fd] = parent->FDT[fd];
 		else {

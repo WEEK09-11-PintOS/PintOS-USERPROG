@@ -186,12 +186,4 @@ typedef struct __donation__
 	struct lock *lock;
 } donation;
 
-struct fork_info
-{
-	struct thread *parent;
-	struct intr_frame parent_if;
-};
-
-
-
 #endif /* threads/thread.h */
