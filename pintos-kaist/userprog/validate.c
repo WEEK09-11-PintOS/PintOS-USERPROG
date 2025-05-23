@@ -42,6 +42,29 @@ void validate_str(const char *str) {
 	}
 }
 
+/* 사용자 주소 UADDR의 바이트를 읽음 */
+int64_t get_user (const uint8_t *uaddr) {
+    int64_t result;
+    __asm __volatile (
+        "movabsq $done_get, %0\n"
+        "movzbq %1, %0\n"
+        "done_get:\n"
+        : "=&a" (result) : "m" (*uaddr));
+    return result;
+}
+
+/* 사용자 주소 UDST에 BYTE를 씀 */
+bool put_user (uint8_t *udst, uint8_t byte) {
+    int64_t error_code;
+	printf("[put_user] trying to write to %p\n", udst);
+    __asm __volatile (
+        "movabsq $done_put, %0\n"
+        "movb %b2, %1\n"
+        "done_put:\n"
+        : "=&a" (error_code), "=m" (*udst) : "q" (byte));
+    return error_code != -1;
+}
+
 /* 유저 → 커널 복사 */
 size_t
 copy_in (void *kernel_dst, const void *user_src, size_t size) {

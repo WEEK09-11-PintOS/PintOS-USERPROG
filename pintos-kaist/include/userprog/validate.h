@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 /* uaddr ~ uaddr+size-1 가
  *   ① NULL 아님
@@ -11,6 +12,9 @@
  * 중 하나라도 틀리면 syscall_exit(-1) 로 즉시 종료한다. */
 void    validate_ptr (const void *uaddr, size_t size);
 void    validate_str (const char *str);
+
+int64_t get_user (const uint8_t *uaddr);
+bool put_user (uint8_t *udst, uint8_t byte);
 
 /* 유저 → 커널 안전 복사.
  * size 바이트 전부 복사 실패 시 syscall_exit(-1). */

@@ -18,13 +18,9 @@
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
-void check_address(void *addr);
 static int sys_write(int fd, const void *buffer, unsigned size);
 static void sys_halt();
 bool sys_create(const char *file, unsigned initial_size);
-bool strlcpy_user(char *dst, const char *src_user, size_t size);
-static int64_t get_user (const uint8_t *uaddr);
-static bool put_user (uint8_t *udst, uint8_t byte);
 void sys_seek(int fd, unsigned position);
 unsigned sys_tell(int fd);
 bool sys_remove(const char *file);
@@ -81,7 +77,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		sys_halt();
 		break;
 	case SYS_EXIT:
-		sys_exit(arg1);
+		sys_exit((int)arg1);
 		break;
 	case SYS_FORK:
 		f->R.rax = sys_fork((const char *)arg1, f);
@@ -90,34 +86,34 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		f->R.rax = sys_exec((const char *)arg1);
 		break;
 	case SYS_CREATE:
-		f->R.rax = sys_create(arg1, arg2);
+		f->R.rax = sys_create((const char *)arg1, (unsigned)arg2);
 		break;
 	case SYS_REMOVE:
-		f->R.rax = sys_remove(arg1);
+		f->R.rax = sys_remove((const char *)arg1);
 		break;
 	case SYS_OPEN:
-		f->R.rax = sys_open(arg1);
+		f->R.rax = sys_open((const char *)arg1);
 		break;
 	case SYS_FILESIZE:
-		f->R.rax = sys_filesize(arg1);
+		f->R.rax = sys_filesize((int)arg1);
 		break;
 	case SYS_READ:
-		f->R.rax = sys_read(arg1, arg2, arg3);
+		f->R.rax = sys_read((int)arg1, (void *)arg2, (unsigned)arg3);
 		break;
 	case SYS_WRITE:
-		f->R.rax = sys_write(arg1, arg2, arg3);
+		f->R.rax = sys_write((int)arg1, (const void *)arg2, (unsigned)arg3);
 		break;
 	case SYS_SEEK:
-		sys_seek(arg1, arg2);
+		sys_seek((int)arg1, (unsigned)arg2);
 		break;
 	case SYS_TELL:
 		f->R.rax = sys_tell(arg1);
 		break;
 	case SYS_CLOSE:
-		sys_close(arg1);
+		sys_close((int)arg1);
 		break;
 	case SYS_WAIT:
-		f->R.rax = sys_wait(arg1);
+		f->R.rax = sys_wait((int)arg1);
 		break;
 
 	default:
@@ -126,42 +122,6 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	}
 }
 
-void check_address(void *addr)
-{
-	if (addr == NULL)
-		sys_exit(-1);
-	if (!is_user_vaddr(addr))
-		sys_exit(-1);
-	if (pml4_get_page(thread_current()->pml4, addr) == NULL)
-		sys_exit(-1);
-}
-
-
-/* 사용자 주소 UADDR의 바이트를 읽음 */
-static int64_t get_user (const uint8_t *uaddr) {
-    int64_t result;
-    __asm __volatile (
-        "movabsq $done_get, %0\n"
-        "movzbq %1, %0\n"
-        "done_get:\n"
-        : "=&a" (result) : "m" (*uaddr));
-    return result;
-}
-
-/* 사용자 주소 UDST에 BYTE를 씀 */
-static bool put_user (uint8_t *udst, uint8_t byte) {
-    int64_t error_code;
-	printf("[put_user] trying to write to %p\n", udst);
-    __asm __volatile (
-        "movabsq $done_put, %0\n"
-        "movb %b2, %1\n"
-        "done_put:\n"
-        : "=&a" (error_code), "=m" (*udst) : "q" (byte));
-    return error_code != -1;
-}
-
-
-
 static void sys_halt() {
 	power_off();
 }
@@ -169,12 +129,7 @@ static void sys_halt() {
 static int sys_write(int fd, const void *buffer, unsigned size)
 {
 	// 유저 포인터가 유효한지 검증 (전체 영역 검사 이전에 시작 주소 먼저)
-	check_address(buffer);
-
-    // buffer가 가리키는 전체 메모리 영역이 유저 공간에 있는지 확인
-    for (unsigned i = 0; i < size; i++) {
-        check_address((const uint8_t *)buffer + i);
-    }
+	validate_ptr(buffer, size);
 
 	// stdin, stderr은 write 대상이 아님 → 에러 반환
 	if (fd == 0 || fd == 2) {
@@ -245,7 +200,7 @@ tid_t sys_fork(const char *thread_name, struct intr_frame *f)
 // 파일을 삭제하는 시스템 콜 구현
 bool sys_remove(const char *file) {
 	// 유저가 넘긴 포인터가 유효한 사용자 공간 주소인지 검증
-	check_address(file);
+	validate_ptr(file, 1);
 
 	// 만약 포인터 자체가 NULL이면 삭제 실패 (방어 코드)
 	if (file == NULL) {
@@ -275,8 +230,8 @@ int sys_filesize(int fd) {
 // 시스템 콜: fd로부터 size만큼 읽어 buffer에 저장하고, 실제 읽은 바이트 수 반환
 int sys_read(int fd, void *buffer, unsigned size)
 {
-	// 유저 공간 포인터가 유효한지 확인 (시작 주소만 검사)
-	check_address(buffer);
+	// 유저 공간 포인터가 유효한지 확인
+	validate_ptr(buffer, size);
 
 	// buffer를 char 포인터로 변환해서 문자 단위로 접근
 	char *ptr = (char *)buffer;
@@ -373,11 +328,11 @@ void sys_close(int fd) {
 // 파일 이름(file)을 받아, initial_size만큼의 크기를 가진 새 파일을 생성함
 bool sys_create(const char *file, unsigned initial_size) {
 	// 유저 포인터가 유효한지 검사
-	check_address(file);
+	validate_ptr(file, 1);
 
 	// 유저 영역 문자열을 커널 버퍼로 안전하게 복사
 	char kernel_buf[NAME_MAX + 1];
-    if (!strlcpy_user(kernel_buf, file, sizeof kernel_buf)) {
+    if (!copy_in(kernel_buf, file, sizeof kernel_buf)) {
         return false; // 복사 실패 → 파일 이름을 읽지 못했음
     }
 
@@ -410,39 +365,10 @@ bool sys_create(const char *file, unsigned initial_size) {
 	return success;
 }
 
-
-// 유저 공간의 문자열을 커널 버퍼(dst)로 안전하게 복사 (최대 size 바이트)
-// null-terminator까지 복사되면 true 반환, 실패하거나 초과하면 false
-bool strlcpy_user(char *dst, const char *src_user, size_t size) {
-    for (size_t i = 0; i < size; i++) {
-        // 유저 공간 주소가 유효한지 확인
-        check_address((void *)(src_user + i));
-
-        // 유저 메모리에서 한 글자 읽기
-        int val = get_user((const uint8_t *)src_user + i);
-		if (val == -1) {
-    		return false; // 잘못된 주소거나 읽기 실패
-		}
-
-		// 커널 버퍼에 문자 저장
-		dst[i] = val;
-
-		// null 문자('\0') 만나면 문자열 끝 → 복사 성공
-		if (val == '\0') {
-    		return true;
-		}
-    }
-
-    // 만약 null 문자 없이 size를 다 채운 경우 → 강제로 null 종료, 하지만 실패 반환
-    dst[size - 1] = '\0';
-    return false;
-}
-
-
 // 파일을 열고, 해당 파일을 가리키는 새로운 파일 디스크립터를 반환
 int sys_open(const char *file_name) {
 	// 유저 포인터가 유효한 사용자 주소인지 확인
-	check_address(file_name);
+	validate_ptr(file_name, 1);
 
 	// 파일 시스템 접근 전 lock 획득 (동시성 제어)
 	lock_acquire(&filesys_lock);
