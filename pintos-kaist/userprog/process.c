@@ -193,7 +193,7 @@ __do_fork(void *aux)
 	int fd_end = parent->next_FD;
 
 	for (int fd = 0; fd < MAX_FD; fd++) {
-		if (fd <= 1)
+		if (fd <= 2)
 			current->FDT[fd] = parent->FDT[fd];
 		else {
 			if (parent->FDT[fd] != NULL) 
@@ -756,8 +756,8 @@ static void argument_stack(char *argv[], int argc, struct intr_frame *if_) {
 int process_add_file(struct file *file) {
 	struct thread *curr = thread_current();
 
-	// fd는 0(stdin), 1(stdout)을 건너뛰고 3부터 시작
-	for (int fd = 2; fd < MAX_FD; fd++) {
+	// fd는 0(stdin), 1(stdout), 2(stderr)을 건너뛰고 3부터 시작
+	for (int fd = 3; fd < MAX_FD; fd++) {
 		// 비어 있는 슬롯 찾기
 		if (curr->FDT[fd] == NULL) {
 			curr->FDT[fd] = file;  // 파일 등록
@@ -775,9 +775,9 @@ int process_add_file(struct file *file) {
 struct file *process_get_file(int fd) {
 	struct thread *curr = thread_current();
 
-	// stdin(0), stdout(1)은 시스템 콜에서 직접 처리하므로 제외
+	// stdin(0), stdout(1), stderr(2)은 시스템 콜에서 직접 처리하므로 제외
 	// 유효한 범위가 아니면 NULL
-	if (fd < 2 || fd >= MAX_FD) {
+	if (fd < 3 || fd >= MAX_FD) {
 		return NULL;
 	}
 
@@ -790,8 +790,8 @@ struct file *process_get_file(int fd) {
 void process_close_file(int fd) {
 	struct thread *curr = thread_current();
 	
-	// stdin, stdout 제외 + 유효한 범위인지 확인
-	if (fd >= 2 && fd < MAX_FD) {
+	// stdin, stdout, stderr 제외 + 유효한 범위인지 확인
+	if (fd >= 3 && fd < MAX_FD) {
 		// 실제로 열려 있는 파일이 있으면 닫기
 		if (curr->FDT[fd] != NULL) {
 			file_close(curr->FDT[fd]);      // 파일 자원 해제
@@ -804,8 +804,8 @@ void process_close_file(int fd) {
 void process_close_all_files(void) {
 	struct thread *curr = thread_current();
 
-	// fd = 2 이상부터 시작 → 유저 파일 디스크립터만 닫음
-	for (int fd = 2; fd < MAX_FD; fd++) {
+	// fd = 3 이상부터 시작 → 유저 파일 디스크립터만 닫음
+	for (int fd = 3; fd < MAX_FD; fd++) {
 		if (curr->FDT[fd] != NULL) {
 			file_close(curr->FDT[fd]);      // 파일 닫기
 			curr->FDT[fd] = NULL;           // 슬롯 초기화

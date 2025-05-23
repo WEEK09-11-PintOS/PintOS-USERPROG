@@ -176,8 +176,8 @@ static int sys_write(int fd, const void *buffer, unsigned size)
         check_address((const uint8_t *)buffer + i);
     }
 
-	// stdin (fd == 0)은 write 대상이 아님 → 에러 반환
-	if (fd == 0) {
+	// stdin, stderr은 write 대상이 아님 → 에러 반환
+	if (fd == 0 || fd == 2) {
 		return -1;
 	}
 
@@ -297,8 +297,8 @@ int sys_read(int fd, void *buffer, unsigned size)
 	}
 	else
 	{
-		// 잘못된 fd(1: stdout이거나 음수인 경우)는 읽을 수 없음 → 에러
-		if (fd < 2)
+		// 잘못된 fd(1: stdout, 2:stderr이거나 음수인 경우)는 읽을 수 없음 → 에러
+		if (fd < 3)
 		{
 			lock_release(&filesys_lock);
 			return -1;
